@@ -1,0 +1,19 @@
+* {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+
+#playground {
+  width: 750px;
+  height: 450px;
+  border: 1px solid black;
+}
