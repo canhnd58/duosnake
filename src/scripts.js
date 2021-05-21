@@ -1,12 +1,12 @@
 const DEFAULT_NCOLS = 45;
 const DEFAULT_NROWS = 27;
+
 const DEFAULT_DPI_MULTIPLIER = 2;
 const DEFAULT_NEXT_MOVE_DELAY = 1000; // ms
 const DEFAULT_MAXIMUM_DIRECTION_QUEUE_SIZE = 4;
 
 const INITIAL_GAME_SPEED = 4;
 const INITIAL_SNAKE_MAX_LENGTH = 3;
-
 
 // The following constants are not meant to be changed
 const CELL_UNOCCUPIED = 0;
@@ -23,12 +23,26 @@ const DIRECTION_DIFF_Y = [-1, 0, 0, 1];
 
 
 // Yet these can be changed
-const DIRECTION_CTRL_KEY_MAP = {
+const PLAYER_0_KEY_CTRL = {
   'w': DIRECTION_UP,
   's': DIRECTION_DOWN,
   'a': DIRECTION_LEFT,
   'd': DIRECTION_RIGHT
 };
+
+const PLAYER_1_KEY_CTRL = {
+  'o': DIRECTION_UP,
+  'l': DIRECTION_DOWN,
+  'k': DIRECTION_LEFT,
+  ';': DIRECTION_RIGHT
+};
+
+const PLAYER_0_COLOR_SNAKE_HEAD = 'rgba(30, 130, 76, 1)';   // green
+const PLAYER_0_COLOR_SNAKE_BODY = 'rgba(30, 130, 76, 0.7)';
+
+const PLAYER_1_COLOR_SNAKE_HEAD = 'rgba(214, 69, 65, 1)';   // red
+const PLAYER_1_COLOR_SNAKE_BODY = 'rgba(214, 69, 65, 0.7)';
+
 
 
 const Board = class {
@@ -37,7 +51,10 @@ const Board = class {
     this.h = height;
 
     this.cells = [...new Array(height)]
-      .map(() => new Array(width).fill(CELL_UNOCCUPIED));
+      .map(() => new Array(width).fill({
+        value: CELL_UNOCCUPIED,
+        owner: null
+      }));
   }
 
   getDim() {
@@ -51,9 +68,8 @@ const Board = class {
     return this.cells[y][x];
   }
 
-  put(x, y, value) {
-    this.cells[y][x] = value;
-    return this;
+  put(x, y, cell) {
+    this.cells[y][x] = cell;
   }
 };
 
@@ -79,20 +95,26 @@ const Snake = class {
     return false;
   }
 
+  setOwner(owner) {
+    this.owner = owner;
+  }
+
   move() {
     const { w, h } = this.board.getDim();
     const head = this.getHead();
-    this.board.put(head.x, head.y, CELL_SNAKE_BODY);
+    this.board.put(head.x, head.y, { value: CELL_SNAKE_BODY, owner: this.owner });
 
     const newHead = {
       x: (head.x + w + DIRECTION_DIFF_X[this.direction]) % w,
       y: (head.y + h + DIRECTION_DIFF_Y[this.direction]) % h
     };
-    this.board.put(newHead.x, newHead.y, CELL_SNAKE_HEAD);
+    this.board.put(newHead.x, newHead.y, { value: CELL_SNAKE_HEAD, owner: this.owner });
     this.body.unshift(newHead);
 
     const tail = this.getTail();
-    this.board.put(tail.x, tail.y, CELL_UNOCCUPIED);
+    if (this.board.at(tail.x, tail.y).owner == this.owner) {
+      this.board.put(tail.x, tail.y, { value: CELL_UNOCCUPIED, owner: null });
+    }
     this.body.pop();
   }
 
@@ -106,22 +128,25 @@ const Snake = class {
     switch (direction) {
       case DIRECTION_LEFT:
         head.x = w - 1 - Math.trunc(w / 8);
-        head.y = Math.trunc(h / 2);
+        head.y = h - 1 - Math.trunc(h / 3);
         break;
       case DIRECTION_DOWN:
-        head.x = Math.trunc(w / 2);
+        head.x = w - 1 - Math.trunc(w / 3);
         head.y = Math.trunc(h / 8);
         break;
       case DIRECTION_UP:
-        head.x = Math.trunc(w / 2);
+        head.x = Math.trunc(w / 3);
         head.y = h - 1 - Math.trunc(h / 8);
         break;
       default:
         head.x = Math.trunc(w / 8);
-        head.y = Math.trunc(h / 2);
+        head.y = Math.trunc(h / 3);
         break;
     }
-    board.put(head.x, head.y, CELL_SNAKE_HEAD);
+    board.put(head.x, head.y, {
+      value: CELL_SNAKE_HEAD,
+      owner: this.owner
+    });
     this.body.push(head);
 
     // Create body to the opposite direction
@@ -129,7 +154,10 @@ const Snake = class {
     while (this.body.length < INITIAL_SNAKE_MAX_LENGTH && x > 0 && x < w - 1 && y > 0 && y < h - 1) {
       x = x - DIRECTION_DIFF_X[direction];
       y = y - DIRECTION_DIFF_Y[direction]
-      board.put(x, y, CELL_SNAKE_BODY);
+      board.put(x, y, {
+        value: CELL_SNAKE_BODY,
+        owner: this.owner
+      });
       this.body.push({x, y});
     }
   }
@@ -179,35 +207,63 @@ const Graphic = class {
       h: rect_h
     };
 
-    const cell = board.at(x, y);
-    switch(cell) {
+    const { value, owner } = board.at(x, y);
+    switch(value) {
       case CELL_SNAKE_HEAD:
-        this.drawCellSnakeHead(rect);
+        this.drawCellSnakeHead(rect, owner);
       case CELL_SNAKE_BODY:
-        this.drawCellSnakeBody(rect);
-      default:
-        this.drawCellUnoccupied(rect);
+        this.drawCellSnakeBody(rect, owner);
     }
   }
 
-  drawCellUnoccupied(rect) {
-    // Do nothing
-  }
-
-  drawCellSnakeHead(rect) {
+  drawCellSnakeHead(rect, player) {
     const { x, y, w, h } = rect;
     this.ctx.save();
-    this.ctx.fillStyle = 'rgba(30, 130, 76, 1)';
+    this.ctx.fillStyle = player.headColor;
     this.ctx.fillRect(x + w*0.05, y + h*0.05, w*0.9, h*0.9);
     this.ctx.restore();
   }
 
-  drawCellSnakeBody(rect) {
+  drawCellSnakeBody(rect, player) {
     const { x, y, w, h } = rect;
     this.ctx.save();
-    this.ctx.fillStyle = 'rgba(30, 130, 76, 0.7)';
+    this.ctx.fillStyle = player.bodyColor;
     this.ctx.fillRect(x + w*0.05, y + h*0.05, w*0.9, h*0.9);
     this.ctx.restore();
+  }
+}
+
+
+const Player = class {
+  constructor(keyCtrl, headColor, bodyColor) {
+    this.keyCtrl = keyCtrl;
+    this.headColor = headColor;
+    this.bodyColor = bodyColor;
+
+    this.directionQueue = [];
+  }
+
+  join(board, direction = DIRECTION_RIGHT) {
+    this.snake = new Snake();
+    this.snake.setOwner(this);
+    this.snake.join(board, direction);
+  }
+
+
+  move() {
+    while (this.directionQueue.length > 0 && !this.snake.setDirection(this.directionQueue[0])) {
+      this.directionQueue.shift();
+    }
+    this.snake.move();
+  }
+
+  handleKeyEvents(e) {
+    if (Object.keys(this.keyCtrl).includes(e.key)) {
+      const direction = this.keyCtrl[e.key];
+      if (this.directionQueue.push(direction) > DEFAULT_MAXIMUM_DIRECTION_QUEUE_SIZE) {
+        this.directionQueue.shift();
+      }
+    }
   }
 }
 
@@ -216,15 +272,16 @@ const Game = class {
   constructor(canvas) {
     this.graphic = new Graphic(canvas);
     this.board = new Board(DEFAULT_NCOLS, DEFAULT_NROWS);
-    this.snake = new Snake();
 
-    this.snake.join(this.board, DIRECTION_RIGHT);
+    this.player_0 = new Player(PLAYER_0_KEY_CTRL, PLAYER_0_COLOR_SNAKE_HEAD, PLAYER_0_COLOR_SNAKE_BODY);
+    this.player_0.join(this.board, DIRECTION_RIGHT);
+
+    this.player_1 = new Player(PLAYER_1_KEY_CTRL, PLAYER_1_COLOR_SNAKE_HEAD, PLAYER_1_COLOR_SNAKE_BODY);
+    this.player_1.join(this.board, DIRECTION_LEFT);
 
     this.speed = INITIAL_GAME_SPEED;
     this.lastMove = 0;
     this.startTime = null;
-
-    this.directionQueue = [];
   }
 
   start() {
@@ -238,11 +295,8 @@ const Game = class {
 
       // TODO: Issue occurs when the tab loses user's focus for a while
       if (elapsed >= nextMove) {
-        while (this.directionQueue.length > 0 && !this.snake.setDirection(this.directionQueue[0])) {
-          this.directionQueue.shift();
-        }
-
-        this.snake.move();
+        this.player_0.move();
+        this.player_1.move();
         this.lastMove = nextMove;
       }
 
@@ -254,12 +308,8 @@ const Game = class {
   }
 
   handleKeyEvents(e) {
-    if (Object.keys(DIRECTION_CTRL_KEY_MAP).includes(e.key)) {
-      const direction = DIRECTION_CTRL_KEY_MAP[e.key];
-      if (this.directionQueue.push(direction) > DEFAULT_MAXIMUM_DIRECTION_QUEUE_SIZE) {
-        this.directionQueue.shift();
-      }
-    }
+    this.player_0.handleKeyEvents(e);
+    this.player_1.handleKeyEvents(e);
   }
 }
 
