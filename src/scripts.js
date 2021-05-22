@@ -12,6 +12,7 @@ const INITIAL_SNAKE_MAX_LENGTH = 3;
 const CELL_UNOCCUPIED = 0;
 const CELL_SNAKE_HEAD = 1;
 const CELL_SNAKE_BODY = 2;
+const CELL_FOOD       = 3;
 
 const DIRECTION_UP = 0;
 const DIRECTION_RIGHT = 1;
@@ -37,11 +38,11 @@ const PLAYER_1_KEY_CTRL = {
   ';': DIRECTION_RIGHT
 };
 
-const PLAYER_0_COLOR_SNAKE_HEAD = 'rgba(30, 130, 76, 1)';   // green
-const PLAYER_0_COLOR_SNAKE_BODY = 'rgba(30, 130, 76, 0.7)';
+const PLAYER_0_COLOR_SNAKE_HEAD = 'rgba(30, 130, 76, 0.9)';   // green
+const PLAYER_0_COLOR_SNAKE_BODY = 'rgba(30, 130, 76, 0.6)';
 
-const PLAYER_1_COLOR_SNAKE_HEAD = 'rgba(214, 69, 65, 1)';   // red
-const PLAYER_1_COLOR_SNAKE_BODY = 'rgba(214, 69, 65, 0.7)';
+const PLAYER_1_COLOR_SNAKE_HEAD = 'rgba(214, 69, 65, 0.9)';   // red
+const PLAYER_1_COLOR_SNAKE_BODY = 'rgba(214, 69, 65, 0.6)';
 
 
 
@@ -50,8 +51,7 @@ const Board = class {
     this.w = width;
     this.h = height;
 
-    this.cells = [...new Array(height)]
-      .map(() => new Array(width).fill({
+    this.cells = new Array(width * height).fill().map(() => ({
         value: CELL_UNOCCUPIED,
         owner: null
       }));
@@ -65,11 +65,22 @@ const Board = class {
   }
 
   at(x, y) {
-    return this.cells[y][x];
+    return this.cells[y * this.w + x];
   }
 
   put(x, y, cell) {
-    this.cells[y][x] = cell;
+    this.cells[y * this.w + x] = cell;
+  }
+
+  generateFood(player) {
+    const unoccupiedIndexes = this.cells
+      .map((cell, idx) => ({...cell, idx}))
+      .filter(cell => cell.value == CELL_UNOCCUPIED)
+      .map(cell => cell.idx);
+
+    const randomIdx = unoccupiedIndexes[Math.floor(Math.random() * unoccupiedIndexes.length)];
+    this.cells[randomIdx].value = CELL_FOOD;
+    this.cells[randomIdx].owner = player;
   }
 };
 
@@ -108,14 +119,21 @@ const Snake = class {
       x: (head.x + w + DIRECTION_DIFF_X[this.direction]) % w,
       y: (head.y + h + DIRECTION_DIFF_Y[this.direction]) % h
     };
+
+    const cell = this.board.at(newHead.x, newHead.y);
     this.board.put(newHead.x, newHead.y, { value: CELL_SNAKE_HEAD, owner: this.owner });
     this.body.unshift(newHead);
-
-    const tail = this.getTail();
-    if (this.board.at(tail.x, tail.y).owner == this.owner) {
-      this.board.put(tail.x, tail.y, { value: CELL_UNOCCUPIED, owner: null });
+    if (cell.value == CELL_FOOD) {
+      this.board.generateFood(cell.owner);
     }
-    this.body.pop();
+
+    if (cell.value != CELL_FOOD || cell.owner != this.owner) {
+      const tail = this.getTail();
+      if (this.board.at(tail.x, tail.y).owner == this.owner) {
+        this.board.put(tail.x, tail.y, { value: CELL_UNOCCUPIED, owner: null });
+      }
+      this.body.pop();
+    }
   }
 
   join(board, direction = DIRECTION_RIGHT) {
@@ -211,8 +229,13 @@ const Graphic = class {
     switch(value) {
       case CELL_SNAKE_HEAD:
         this.drawCellSnakeHead(rect, owner);
+        break;
       case CELL_SNAKE_BODY:
         this.drawCellSnakeBody(rect, owner);
+        break;
+      case CELL_FOOD:
+        this.drawCellFood(rect, owner);
+        break;
     }
   }
 
@@ -229,6 +252,16 @@ const Graphic = class {
     this.ctx.save();
     this.ctx.fillStyle = player.bodyColor;
     this.ctx.fillRect(x + w*0.05, y + h*0.05, w*0.9, h*0.9);
+    this.ctx.restore();
+  }
+
+  drawCellFood(rect, player) {
+    const { x, y, w, h } = rect;
+    this.ctx.save();
+    this.ctx.fillStyle = player.headColor;
+    this.ctx.beginPath();
+    this.ctx.arc(x + w/2, y + h/2, Math.min(w, h)/2*0.8, 0, Math.PI*2, true);
+    this.ctx.fill();
     this.ctx.restore();
   }
 }
@@ -274,14 +307,17 @@ const Game = class {
     this.board = new Board(DEFAULT_NCOLS, DEFAULT_NROWS);
 
     this.player_0 = new Player(PLAYER_0_KEY_CTRL, PLAYER_0_COLOR_SNAKE_HEAD, PLAYER_0_COLOR_SNAKE_BODY);
-    this.player_0.join(this.board, DIRECTION_RIGHT);
-
     this.player_1 = new Player(PLAYER_1_KEY_CTRL, PLAYER_1_COLOR_SNAKE_HEAD, PLAYER_1_COLOR_SNAKE_BODY);
-    this.player_1.join(this.board, DIRECTION_LEFT);
 
     this.speed = INITIAL_GAME_SPEED;
     this.lastMove = 0;
     this.startTime = null;
+
+    this.player_0.join(this.board, DIRECTION_RIGHT);
+    this.player_1.join(this.board, DIRECTION_LEFT);
+
+    this.board.generateFood(this.player_0);
+    this.board.generateFood(this.player_1);
   }
 
   start() {
