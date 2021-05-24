@@ -7,12 +7,13 @@ const DEFAULT_MAXIMUM_DIRECTION_QUEUE_SIZE = 4;
 
 const INITIAL_GAME_SPEED = 4;
 const INITIAL_SNAKE_MAX_LENGTH = 3;
+const MAX_PLAYER = 10;
 
 // The following constants are not meant to be changed
-const CELL_UNOCCUPIED = 0;
-const CELL_SNAKE_HEAD = 1;
-const CELL_SNAKE_BODY = 2;
-const CELL_FOOD       = 3;
+const CELL_PLACEHOLDER = -1;
+const CELL_SNAKE_HEAD = 0;
+const CELL_SNAKE_BODY = 1;
+const CELL_FOOD       = 2;
 
 const DIRECTION_UP = 0;
 const DIRECTION_RIGHT = 1;
@@ -38,23 +39,89 @@ const PLAYER_1_KEY_CTRL = {
   ';': DIRECTION_RIGHT
 };
 
-const PLAYER_0_COLOR_SNAKE_HEAD = 'rgba(30, 130, 76, 0.9)';   // green
-const PLAYER_0_COLOR_SNAKE_BODY = 'rgba(30, 130, 76, 0.6)';
+const PLAYER_0_COLOR = 'rgb(30, 130, 76)';   // green
+const PLAYER_1_COLOR = 'rgb(214, 69, 65)';   // red
 
-const PLAYER_1_COLOR_SNAKE_HEAD = 'rgba(214, 69, 65, 0.9)';   // red
-const PLAYER_1_COLOR_SNAKE_BODY = 'rgba(214, 69, 65, 0.6)';
 
+const Cell = class {
+  constructor() {
+    this.objs = {};
+  }
+
+  empty() {
+    return Object.keys(this.objs).length == 0;
+  }
+
+  add(type, owner) {
+    const key = this.toKey(type, owner);
+    this.objs[key] = this.objs[key] + 1 || 1;
+    return this;
+  }
+
+  remove(type, owner) {
+    if (type > 0 && owner == null) {
+      this.getOwners(type).forEach(o => this.remove(type, o));
+      return this;
+    }
+
+    const key = this.toKey(type, owner);
+    if (this.objs[key] !== undefined) {
+      this.objs[key] -= 1;
+    }
+    if (this.objs[key] == 0) {
+      delete this.objs[key];
+    }
+    return this;
+  }
+
+  clear() {
+    this.objs = {};
+  }
+
+  get(type, owner) {
+    if (type > 0 && owner == null) {
+      this.getOwners(type)
+        .map(o => this.get(type, owner))
+        .reduce((a, b) => a + b, 0);
+    }
+    const key = this.toKey(type, owner);
+    return this.objs[key] || 0;
+  }
+
+  getOwners(type) {
+    if (type < 0) {
+      return [];
+    }
+    return Object.keys(this.objs)
+      .filter(key => this.toType(key) == type)
+      .map(key => this.toOwner(key));
+  }
+
+  getTypes() {
+    return Object.keys(this.objs).map(k => this.toType(k));
+  }
+
+  toType(key) {
+    const k = parseInt(key);
+    return k < 0 ? k : Math.floor(k / MAX_PLAYER);
+  }
+
+  toOwner(key) {
+    const k = parseInt(key);
+    return k < 0 ? null : k % MAX_PLAYER;
+  }
+
+  toKey(type, owner) {
+    return type < 0 ? type : type * MAX_PLAYER + owner;
+  }
+}
 
 
 const Board = class {
   constructor(width, height) {
     this.w = width;
     this.h = height;
-
-    this.cells = new Array(width * height).fill().map(() => ({
-        value: CELL_UNOCCUPIED,
-        owner: null
-      }));
+    this.cells = new Array(width * height).fill().map(() => new Cell());
   }
 
   getDim() {
@@ -64,30 +131,30 @@ const Board = class {
     };
   }
 
-  at(x, y) {
+  at({x, y}) {
     return this.cells[y * this.w + x];
   }
 
-  put(x, y, cell) {
+  put({x, y}, cell) {
     this.cells[y * this.w + x] = cell;
   }
 
   generateFood(player) {
     const unoccupiedIndexes = this.cells
-      .map((cell, idx) => ({...cell, idx}))
-      .filter(cell => cell.value == CELL_UNOCCUPIED)
-      .map(cell => cell.idx);
+      .map((cell, idx) => ({cell, idx}))
+      .filter(wrapper => wrapper.cell.empty())
+      .map(wrapper => wrapper.idx);
 
     const randomIdx = unoccupiedIndexes[Math.floor(Math.random() * unoccupiedIndexes.length)];
-    this.cells[randomIdx].value = CELL_FOOD;
-    this.cells[randomIdx].owner = player;
+    this.cells[randomIdx].add(CELL_FOOD, player);
   }
 };
 
 
 const Snake = class {
-  constructor() {
+  constructor(owner) {
     this.body = [];
+    this.owner = owner;
   }
 
   getHead() {
@@ -106,34 +173,34 @@ const Snake = class {
     return false;
   }
 
-  setOwner(owner) {
-    this.owner = owner;
-  }
-
   move() {
     const { w, h } = this.board.getDim();
     const head = this.getHead();
-    this.board.put(head.x, head.y, { value: CELL_SNAKE_BODY, owner: this.owner });
+    this.board.at(head)
+      .remove(CELL_SNAKE_HEAD, this.owner)
+      .add(CELL_SNAKE_BODY, this.owner);
 
     const newHead = {
       x: (head.x + w + DIRECTION_DIFF_X[this.direction]) % w,
       y: (head.y + h + DIRECTION_DIFF_Y[this.direction]) % h
     };
 
-    const cell = this.board.at(newHead.x, newHead.y);
-    this.board.put(newHead.x, newHead.y, { value: CELL_SNAKE_HEAD, owner: this.owner });
-    this.body.unshift(newHead);
-    if (cell.value == CELL_FOOD) {
-      this.board.generateFood(cell.owner);
-    }
-
-    if (cell.value != CELL_FOOD || cell.owner != this.owner) {
+    const cell = this.board.at(newHead);
+    if (cell.get(CELL_FOOD, this.owner) == 0) {
       const tail = this.getTail();
-      if (this.board.at(tail.x, tail.y).owner == this.owner) {
-        this.board.put(tail.x, tail.y, { value: CELL_UNOCCUPIED, owner: null });
-      }
+      this.board.at(tail).remove(CELL_SNAKE_BODY, this.owner);
       this.body.pop();
     }
+
+    cell.add(CELL_SNAKE_HEAD, this.owner);
+    this.body.unshift(newHead);
+
+    const foodOwners = cell.getOwners(CELL_FOOD);
+    if (foodOwners.length > 0) {
+      foodOwners.forEach(owner => cell.remove(CELL_FOOD, owner));
+      foodOwners.forEach(owner => this.board.generateFood(owner));
+    }
+
   }
 
   join(board, direction = DIRECTION_RIGHT) {
@@ -161,10 +228,7 @@ const Snake = class {
         head.y = Math.trunc(h / 3);
         break;
     }
-    board.put(head.x, head.y, {
-      value: CELL_SNAKE_HEAD,
-      owner: this.owner
-    });
+    board.at(head).add(CELL_SNAKE_HEAD, this.owner);
     this.body.push(head);
 
     // Create body to the opposite direction
@@ -172,46 +236,138 @@ const Snake = class {
     while (this.body.length < INITIAL_SNAKE_MAX_LENGTH && x > 0 && x < w - 1 && y > 0 && y < h - 1) {
       x = x - DIRECTION_DIFF_X[direction];
       y = y - DIRECTION_DIFF_Y[direction]
-      board.put(x, y, {
-        value: CELL_SNAKE_BODY,
-        owner: this.owner
-      });
+      board.at({x, y}).add(CELL_SNAKE_BODY, this.owner);
       this.body.push({x, y});
     }
   }
 }
 
 
-const Graphic = class {
-  constructor(canvas) {
-    this.cv = canvas;
-    this.ctx = canvas.getContext('2d');
+const Palette = class {
+  constructor(colors) {
+    this.colors = colors;
+    this.caches = {};
   }
 
-  clear() {
-    const { w, h } = this.getDim();
-    this.ctx.clearRect(0, 0, w, h);
+  getCacheKey(type, colorIdx) {
+    return '' + type + '-' + colorIdx;
   }
 
-  draw(board) {
-    this.clear();
-    this.ctx.save();
+  clearCache() {
+    this.caches = {};
+  }
+
+  get(type, colorIdx) {
+    const key = this.getCacheKey(type, colorIdx);
+    const img = this.caches[key]
+      ? this.caches[key]
+      : this.create(type, this.colors[colorIdx]);
+    this.caches[key] = img;
+    return img;
+  }
+
+  create(type, color) {
+    switch(type) {
+      case CELL_SNAKE_HEAD:
+        return this.createSnakeHead(color);
+      case CELL_SNAKE_BODY:
+        return this.createSnakeBody(color);
+      case CELL_FOOD:
+        return this.createFood(color);
+    }
+  }
+
+  createSnakeHead(color) {
+    const canvas = this.createCanvas({w: 64, h: 64});
+    const ctx = canvas.getContext('2d');
+    const path = new Path2D('M 2,2 h 60 v 60 h -60 Z');
+    const {r, g, b, a} = Color.getRGBA(color);
+    ctx.fillStyle = Color.toColor({r, g, b, a: a - 0.2});
+    ctx.fill(path);
+    return canvas;
+  }
+
+  createSnakeBody(color) {
+    const canvas = this.createCanvas({w: 64, h: 64});
+    const ctx = canvas.getContext('2d');
+    const path = new Path2D('M 2,2 h 60 v 60 h -60 Z');
+    const {r, g, b, a} = Color.getRGBA(color);
+    ctx.fillStyle = Color.toColor({r, g, b, a: a - 0.5});
+    ctx.fill(path);
+    return canvas;
+  }
+
+  createFood(color) {
+    const canvas = this.createCanvas({w: 64, h: 64});
+    const ctx = canvas.getContext('2d');
+    const {r, g, b, a} = Color.getRGBA(color);
+    ctx.fillStyle = Color.toColor({r, g, b, a: a - 0.2});
+    ctx.arc(32, 32, 30, 0, Math.PI*2, true);
+    ctx.fill();
+    return canvas;
+  }
+
+  createCanvas({w, h}) {
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    return canvas;
+  }
+}
+
+const Color = {
+  RGBA_REGEX: /^rgba\((\d+),[ ]?(\d+),[ ]?(\d+), [ ]?[\d\.]+\)$/,
+  RGB_REGEX: /^rgb\((\d+),[ ]?(\d+),[ ]?(\d+)\)$/,
+
+  getRGBA: rgba => {
+    let match = Color.RGBA_REGEX.exec(rgba);
+    if (match) {
+      return {
+        r: parseInt(match[1]),
+        g: parseInt(match[2]),
+        b: parseInt(match[3]),
+        a: parseFloat(match[4])};
+    }
+    match = Color.RGB_REGEX.exec(rgba);
+    if (match) {
+      return {
+        r: parseInt(match[1]),
+        g: parseInt(match[2]),
+        b: parseInt(match[3]),
+        a: 1};
+    }
+  },
+
+  toColor: ({r, g, b, a}) => `rgba(${r},${g},${b},${a})`,
+}
+
+const Graphic = {
+  clear: (canvas) => {
+    const { w, h } = Graphic.getDim(canvas);
+    canvas.getContext('2d').clearRect(0, 0, w, h);
+  },
+
+  getDim: (canvas) => {
+    return { w: canvas.width, h: canvas.height };
+  },
+
+  draw: (canvas, board, palette) => {
+    Graphic.clear(canvas);
+    const ctx = canvas.getContext('2d');
+    ctx.save();
+    ctx.globalCompositeOperation = 'color';
     const { w, h } = board.getDim();
     for (let x = 0; x < board.w; x ++) {
       for (let y = 0; y < board.h; y ++) {
-        this.drawCell(board, x, y);
+        Graphic.drawCell(canvas, board, {x, y}, palette);
       }
     }
-    this.ctx.restore();
-  }
+    ctx.restore();
+  },
 
-  getDim() {
-    return { w: this.cv.width, h: this.cv.height };
-  }
-
-  drawCell(board, x, y) {
+  drawCell: (canvas, board, {x, y}, palette) => {
     const { w: board_w, h: board_h } = board.getDim();
-    const { w: canvas_w, h: canvas_h } = this.getDim();
+    const { w: canvas_w, h: canvas_h } = Graphic.getDim(canvas);
 
     // Convert board coordinates to canvas coordinates
     const rect_w = canvas_w / board_w;
@@ -225,60 +381,31 @@ const Graphic = class {
       h: rect_h
     };
 
-    const { value, owner } = board.at(x, y);
-    switch(value) {
-      case CELL_SNAKE_HEAD:
-        this.drawCellSnakeHead(rect, owner);
-        break;
-      case CELL_SNAKE_BODY:
-        this.drawCellSnakeBody(rect, owner);
-        break;
-      case CELL_FOOD:
-        this.drawCellFood(rect, owner);
-        break;
+    const cell = board.at({x, y});
+    if (!cell.empty()) {
     }
-  }
+    cell.getTypes().forEach(type => {
+      cell.getOwners(type)
+        .map(owner => palette.get(type, owner))
+        .forEach(image => Graphic.drawImage(canvas, rect, image));
+    });
+  },
 
-  drawCellSnakeHead(rect, player) {
-    const { x, y, w, h } = rect;
-    this.ctx.save();
-    this.ctx.fillStyle = player.headColor;
-    this.ctx.fillRect(x + w*0.05, y + h*0.05, w*0.9, h*0.9);
-    this.ctx.restore();
-  }
-
-  drawCellSnakeBody(rect, player) {
-    const { x, y, w, h } = rect;
-    this.ctx.save();
-    this.ctx.fillStyle = player.bodyColor;
-    this.ctx.fillRect(x + w*0.05, y + h*0.05, w*0.9, h*0.9);
-    this.ctx.restore();
-  }
-
-  drawCellFood(rect, player) {
-    const { x, y, w, h } = rect;
-    this.ctx.save();
-    this.ctx.fillStyle = player.headColor;
-    this.ctx.beginPath();
-    this.ctx.arc(x + w/2, y + h/2, Math.min(w, h)/2*0.8, 0, Math.PI*2, true);
-    this.ctx.fill();
-    this.ctx.restore();
+  drawImage: (canvas, rect, image) => {
+    canvas.getContext('2d').drawImage(image, rect.x, rect.y, rect.w, rect.h);
   }
 }
 
 
 const Player = class {
-  constructor(keyCtrl, headColor, bodyColor) {
+  constructor(id, keyCtrl) {
+    this.id = id;
     this.keyCtrl = keyCtrl;
-    this.headColor = headColor;
-    this.bodyColor = bodyColor;
-
     this.directionQueue = [];
   }
 
   join(board, direction = DIRECTION_RIGHT) {
-    this.snake = new Snake();
-    this.snake.setOwner(this);
+    this.snake = new Snake(this.id);
     this.snake.join(board, direction);
   }
 
@@ -303,21 +430,22 @@ const Player = class {
 
 const Game = class {
   constructor(canvas) {
-    this.graphic = new Graphic(canvas);
+    this.canvas = canvas;
     this.board = new Board(DEFAULT_NCOLS, DEFAULT_NROWS);
+    this.palette = new Palette([PLAYER_0_COLOR, PLAYER_1_COLOR]);
 
-    this.player_0 = new Player(PLAYER_0_KEY_CTRL, PLAYER_0_COLOR_SNAKE_HEAD, PLAYER_0_COLOR_SNAKE_BODY);
-    this.player_1 = new Player(PLAYER_1_KEY_CTRL, PLAYER_1_COLOR_SNAKE_HEAD, PLAYER_1_COLOR_SNAKE_BODY);
-
-    this.speed = INITIAL_GAME_SPEED;
-    this.lastMove = 0;
-    this.startTime = null;
+    this.player_0 = new Player(0, PLAYER_0_KEY_CTRL);
+    this.player_1 = new Player(1, PLAYER_1_KEY_CTRL);
 
     this.player_0.join(this.board, DIRECTION_RIGHT);
     this.player_1.join(this.board, DIRECTION_LEFT);
 
-    this.board.generateFood(this.player_0);
-    this.board.generateFood(this.player_1);
+    this.board.generateFood(0);
+    this.board.generateFood(1);
+
+    this.speed = INITIAL_GAME_SPEED;
+    this.lastMove = 0;
+    this.startTime = null;
   }
 
   start() {
@@ -336,7 +464,7 @@ const Game = class {
         this.lastMove = nextMove;
       }
 
-      this.graphic.draw(this.board);
+      Graphic.draw(this.canvas, this.board, this.palette);
       window.requestAnimationFrame(redraw);
     }
 
