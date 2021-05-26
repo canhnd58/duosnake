@@ -1,3 +1,5 @@
+const DEBUG = true;
+
 const DEFAULT_NCOLS = 45;
 const DEFAULT_NROWS = 27;
 
@@ -15,28 +17,28 @@ const DEFAULT_COLORS = [
 ];
 
 // The following constants are not meant to be changed
-const CELL_SNAKE_HEAD   = 0;
-const CELL_SNAKE_BODY   = 1;
-const CELL_FOOD         = 2;
-const CELL_CORPSE       = 3;
+const CELL_SNAKE_HEAD         = 0;
+const CELL_SNAKE_BODY         = 1;
+const CELL_FOOD               = 2;
+const CELL_CORPSE             = 3;
 
-const DIRECTION_UP      = 0;
-const DIRECTION_RIGHT   = 1;
-const DIRECTION_LEFT    = 2;
-const DIRECTION_DOWN    = 3;
+const DIRECTION_UP            = 0;
+const DIRECTION_RIGHT         = 1;
+const DIRECTION_LEFT          = 2;
+const DIRECTION_DOWN          = 3;
 
-const DIRECTION_DIFF_X = [0, 1, -1, 0];
-const DIRECTION_DIFF_Y = [-1, 0, 0, 1];
+const DIRECTION_DIFF_X        = [0, 1, -1, 0];
+const DIRECTION_DIFF_Y        = [-1, 0, 0, 1];
 
-const OWNER_ID_BOARD    = 0;
-const OWNER_ID_MAX      = DEFAULT_COLORS.length;
+const OWNER_ID_BOARD          = 0;
+const OWNER_ID_MAX            = DEFAULT_COLORS.length;
+const ROUND_DECIMAL_PLACES    = 10000;  // 4 decimal places
 
 // Yet these can be changed
 const STOMACH_STEAL_MULTIPLIER = 2;
 const STOMACH_VALUES = {
   [CELL_FOOD]: 1,
   [CELL_CORPSE]: 0.25,
-  [CELL_SNAKE_BODY]: 0.5,
 };
 
 const SANITY_STEAL_MULTIPLIER = 5;
@@ -62,6 +64,12 @@ const PLAYER_KEY_CTRLS = [{
   'k': DIRECTION_LEFT,
   ';': DIRECTION_RIGHT
 }];
+
+const Log = DEBUG ? {
+  debug: msg => console.log(msg),
+} : {
+  debug: () => {},
+};
 
 
 const Cell = class {
@@ -235,47 +243,20 @@ const Board = class {
   }
 
   tick() {
-    this.snakes.forEach(snake => snake.moveAndGrow());
+    this.snakes.forEach(snake => snake.move());
+    this.snakes.forEach(snake => snake.eat());
+    this.snakes.forEach(snake => snake.enjoy());
+    this.snakes.forEach(snake => snake.grow());
+    this.snakes.filter(snake => snake.sanity <= 0)
+      .forEach(snake => snake.bite());
 
-    this.snakes.forEach(snake => {
-      const headPos = snake.getHead();
-      const headCell = this.at(headPos);
-
-      headCell.getOwnerIds(CELL_FOOD).forEach(id => {
-        this.generate(CELL_FOOD, id)
-        if (id != OWNER_ID_BOARD && id != snake.id) {
-          this.getSnake(id).changeSanity(-SANITY_VALUES[CELL_FOOD] * SANITY_STEAL_MULTIPLIER);
-        }
+    this.snakes.map(snake => this.at(snake.getHead()))
+      .forEach(headCell => {
+        headCell.getOwnerIds(CELL_FOOD).forEach(id => this.generate(CELL_FOOD, id));
+        [CELL_FOOD, CELL_CORPSE].forEach(t => headCell.remove(t));
       });
-      headCell.remove(CELL_FOOD);
 
-      headCell.getOwnerIds(CELL_CORPSE)
-        .filter(id => id != OWNER_ID_BOARD && id != snake.id)
-        .forEach(id => {
-          this.getSnake(id).changeSanity(-SANITY_VALUES[CELL_CORPSE] * SANITY_STEAL_MULTIPLIER);
-        });
-      headCell.remove(CELL_CORPSE);
-
-      if (snake.sanity <= 0) {
-        [...headCell.getOwnerIds(CELL_SNAKE_BODY), ...headCell.getOwnerIds(CELL_SNAKE_HEAD)]
-          .filter(id => id != snake.id)
-          .forEach(id => {
-            const otherSnake = this.getSnake(id);
-            const bodyIdx = otherSnake.indexOf(headPos);
-            otherSnake.turnIntoCorpse(bodyIdx+1);
-            if (otherSnake.length > 1) {
-              headCell.remove(CELL_SNAKE_BODY, otherSnake.id, 1);
-              otherSnake.body.pop();
-            }
-            otherSnake.changeSanity(-headCell.get(CELL_SNAKE_BODY, id) * SANITY_VALUES[CELL_SNAKE_BODY] * SANITY_STEAL_MULTIPLIER);
-          });
-
-        snake.stomach += headCell.getOwnerIds(CELL_SNAKE_BODY)
-          .filter(id => id != snake.id)
-          .map(id => headCell.get(CELL_SNAKE_BODY, id) * STOMACH_VALUES[CELL_SNAKE_BODY] * STOMACH_STEAL_MULTIPLIER)
-          .reduce((a, b) => a + b, 0);
-      }
-    });
+    this.snakes.map(snake => snake.toDebugStr()).forEach(str => Log.debug(str));
   }
 };
 
@@ -285,6 +266,10 @@ const Snake = class {
     this.body = [];
     this.stomach = 0;
     this.sanity = 1;
+  }
+
+  toDebugStr() {
+    return `snake=${this.id} len=${this.body.length} stomach=${this.stomach} sanity=${this.sanity}`;
   }
 
   getHead() {
@@ -303,13 +288,19 @@ const Snake = class {
     return false;
   }
 
-  changeSanity(diff) {
+  fillStomach(diff) {
+    this.stomach += diff;
+    this.stomach = Util.round(this.stomach);
+  }
+
+  fillSanity(diff) {
     this.sanity += diff;
     this.sanity = Math.min(1, this.sanity);
     this.sanity = Math.max(-1, this.sanity);
+    this.sanity = Util.round(this.sanity);
   }
 
-  moveAndGrow() {
+  move() {
     const head = this.getHead();
     this.board.at(head).remove(CELL_SNAKE_HEAD, this.id);
     if (this.body.length > 1) {
@@ -317,42 +308,68 @@ const Snake = class {
     }
 
     const newHead = this.getNewPos(head, this.direction);
-    const cell = this.board.at(newHead);
-    cell.add(CELL_SNAKE_HEAD, this.id);
+    this.board.at(newHead).add(CELL_SNAKE_HEAD, this.id);
     this.body.unshift(newHead);
+  }
 
-    this.eat(cell);
-    this.enjoy(cell);
-
+  grow() {
     if (this.stomach < 1) {
       const tail = this.getTail();
       this.board.at(tail).remove(CELL_SNAKE_BODY, this.id, 1);
       this.body.pop();
     } else {
-      this.stomach -= 1;
+      this.fillStomach(-1);
     }
   }
 
-  eat(cell, type) {
+  eat(type) {
     if (type == null) {
-      [CELL_FOOD, CELL_CORPSE].forEach(t => this.eat(cell, t));
+      [CELL_FOOD, CELL_CORPSE].forEach(t => this.eat(t));
       return;
     }
 
-    const cnts = cell.getAndGroup(type, [OWNER_ID_BOARD, this.id]);
-    this.stomach += (cnts[OWNER_ID_BOARD] + cnts[this.id] + cnts['other'] * STOMACH_STEAL_MULTIPLIER) * STOMACH_VALUES[type];
+    const headCell = this.board.at(this.getHead());
+    const cnts = headCell.getAndGroup(type, [OWNER_ID_BOARD, this.id]);
+    this.fillStomach((cnts[OWNER_ID_BOARD] + cnts[this.id] + cnts['other'] * STOMACH_STEAL_MULTIPLIER) * STOMACH_VALUES[type]);
+
+    headCell
+      .getOwnerIds(type)
+      .filter(id => this.isStealing(id))
+      .map(id => this.board.getSnake(id))
+      .forEach(otherSnake => otherSnake.fillSanity(-SANITY_VALUES[type] * headCell.get(type, otherSnake.id) * SANITY_STEAL_MULTIPLIER));
   }
 
-  enjoy(cell, type) {
+  enjoy(type) {
     if (type == null) {
-      [CELL_FOOD, CELL_CORPSE].forEach(t => this.enjoy(cell, t));
+      [CELL_FOOD, CELL_CORPSE].forEach(t => this.enjoy(t));
       return;
     }
-    this.changeSanity(cell.get(type) * SANITY_VALUES[type]);
+    this.fillSanity(this.board.at(this.getHead()).get(type) * SANITY_VALUES[type]);
   }
 
-  noPenalty(id) {
-    return id == this.id || id == OWNER_ID_BOARD;
+  bite(type) {
+    if (type == null) {
+      [CELL_SNAKE_HEAD, CELL_SNAKE_BODY].forEach(t => this.bite(t));
+      return;
+    }
+    const headCell = this.board.at(this.getHead());
+    headCell.getOwnerIds(type)
+      .filter(id => this.isStealing(id))
+      .forEach(id => {
+        const otherSnake = this.board.getSnake(id);
+        const bodyIdx = otherSnake.indexOf(this.getHead());
+        otherSnake.turnIntoCorpse(bodyIdx+1);
+        if (type == CELL_SNAKE_BODY) {
+          headCell.remove(CELL_SNAKE_BODY, otherSnake.id, 1);
+          otherSnake.body.pop();
+        }
+        console.log('gg', otherSnake.id, -headCell.get(CELL_SNAKE_BODY, id), SANITY_VALUES[CELL_SNAKE_BODY], SANITY_STEAL_MULTIPLIER);
+        otherSnake.fillSanity(-SANITY_VALUES[CELL_SNAKE_BODY] * SANITY_STEAL_MULTIPLIER);
+      });
+  }
+
+  isStealing(id) {
+    return id != this.id && id != OWNER_ID_BOARD;
   }
 
   indexOf({x, y}) {
@@ -461,6 +478,10 @@ const Palette = class {
     return canvas;
   }
 }
+
+const Util = {
+  round: num => Math.round((num + Number.EPSILON) * ROUND_DECIMAL_PLACES) / ROUND_DECIMAL_PLACES,
+};
 
 const Color = {
   RGBA_REGEX: /^rgba\((\d+),[ ]?(\d+),[ ]?(\d+), [ ]?[\d\.]+\)$/,
