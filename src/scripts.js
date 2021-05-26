@@ -7,40 +7,61 @@ const DEFAULT_MAXIMUM_DIRECTION_QUEUE_SIZE = 4;
 
 const INITIAL_GAME_SPEED = 4;
 const INITIAL_SNAKE_MAX_LENGTH = 3;
-const MAX_PLAYER = 10;
+
+const DEFAULT_COLORS = [
+  'rgb(244, 208, 63)',  // yellow
+  'rgb(30, 130, 76)',   // green
+  'rgb(214, 69, 65)',   // red
+];
 
 // The following constants are not meant to be changed
-const CELL_PLACEHOLDER = -1;
-const CELL_SNAKE_HEAD = 0;
-const CELL_SNAKE_BODY = 1;
-const CELL_FOOD       = 2;
+const CELL_SNAKE_HEAD   = 0;
+const CELL_SNAKE_BODY   = 1;
+const CELL_FOOD         = 2;
+const CELL_CORPSE       = 3;
 
-const DIRECTION_UP = 0;
-const DIRECTION_RIGHT = 1;
-const DIRECTION_LEFT = 2;
-const DIRECTION_DOWN = 3;
+const DIRECTION_UP      = 0;
+const DIRECTION_RIGHT   = 1;
+const DIRECTION_LEFT    = 2;
+const DIRECTION_DOWN    = 3;
 
 const DIRECTION_DIFF_X = [0, 1, -1, 0];
 const DIRECTION_DIFF_Y = [-1, 0, 0, 1];
 
+const OWNER_ID_BOARD    = 0;
+const OWNER_ID_MAX      = DEFAULT_COLORS.length;
 
 // Yet these can be changed
-const PLAYER_0_KEY_CTRL = {
+const STOMACH_STEAL_MULTIPLIER = 2;
+const STOMACH_VALUES = {
+  [CELL_FOOD]: 1,
+  [CELL_CORPSE]: 0.25,
+  [CELL_SNAKE_BODY]: 0.5,
+};
+
+const SANITY_STEAL_MULTIPLIER = 5;
+const SANITY_VALUES = {
+  [CELL_FOOD]: 0.1,
+  [CELL_CORPSE]: 0.01,
+  [CELL_SNAKE_BODY]: 0.4,
+};
+
+const INITIAL_SNAKE_DIRECTIONS = [
+  DIRECTION_RIGHT,
+  DIRECTION_LEFT,
+];
+
+const PLAYER_KEY_CTRLS = [{
   'w': DIRECTION_UP,
   's': DIRECTION_DOWN,
   'a': DIRECTION_LEFT,
   'd': DIRECTION_RIGHT
-};
-
-const PLAYER_1_KEY_CTRL = {
+}, {
   'o': DIRECTION_UP,
   'l': DIRECTION_DOWN,
   'k': DIRECTION_LEFT,
   ';': DIRECTION_RIGHT
-};
-
-const PLAYER_0_COLOR = 'rgb(30, 130, 76)';   // green
-const PLAYER_1_COLOR = 'rgb(214, 69, 65)';   // red
+}];
 
 
 const Cell = class {
@@ -52,23 +73,23 @@ const Cell = class {
     return Object.keys(this.objs).length == 0;
   }
 
-  add(type, owner) {
-    const key = this.toKey(type, owner);
-    this.objs[key] = this.objs[key] + 1 || 1;
+  add(type, ownerId = 0, amount = 1) {
+    const key = this.toKey(type, ownerId);
+    this.objs[key] = this.objs[key] + amount || amount;
     return this;
   }
 
-  remove(type, owner) {
-    if (type > 0 && owner == null) {
-      this.getOwners(type).forEach(o => this.remove(type, o));
+  remove(type, ownerId, amount) {
+    if (ownerId == null) {
+      this.getOwnerIds(type).forEach(id => this.remove(type, id, amount));
       return this;
     }
 
-    const key = this.toKey(type, owner);
+    const key = this.toKey(type, ownerId);
     if (this.objs[key] !== undefined) {
-      this.objs[key] -= 1;
+      this.objs[key] -= (amount != null ? amount : this.objs[key]);
     }
-    if (this.objs[key] == 0) {
+    if (this.objs[key] <= 0) {
       delete this.objs[key];
     }
     return this;
@@ -78,23 +99,29 @@ const Cell = class {
     this.objs = {};
   }
 
-  get(type, owner) {
-    if (type > 0 && owner == null) {
-      this.getOwners(type)
-        .map(o => this.get(type, owner))
+  get(type, ownerId) {
+    if (ownerId == null) {
+      return this.getOwnerIds(type)
+        .map(id => this.get(type, id))
         .reduce((a, b) => a + b, 0);
     }
-    const key = this.toKey(type, owner);
+    const key = this.toKey(type, ownerId);
     return this.objs[key] || 0;
   }
 
-  getOwners(type) {
-    if (type < 0) {
-      return [];
-    }
+  getAndGroup(type, ids) {
+    // { id: cnt, other: cnt }
+    return ids.reduce((obj, id) => ({...obj, [id]: this.get(type, id)}), {
+      'other': this.getOwnerIds(type).filter(id => !ids.includes(id))
+        .map(id => this.get(type, id))
+        .reduce((sum, cnt) => sum + cnt, 0)
+    });
+  }
+
+  getOwnerIds(type) {
     return Object.keys(this.objs)
-      .filter(key => this.toType(key) == type)
-      .map(key => this.toOwner(key));
+      .filter(key => type == null ? true : this.toType(key) == type)
+      .map(key => this.toOwnerId(key));
   }
 
   getTypes() {
@@ -102,17 +129,15 @@ const Cell = class {
   }
 
   toType(key) {
-    const k = parseInt(key);
-    return k < 0 ? k : Math.floor(k / MAX_PLAYER);
+    return Math.floor(parseInt(key) / OWNER_ID_MAX);
   }
 
-  toOwner(key) {
-    const k = parseInt(key);
-    return k < 0 ? null : k % MAX_PLAYER;
+  toOwnerId(key) {
+    return parseInt(key) % OWNER_ID_MAX;
   }
 
-  toKey(type, owner) {
-    return type < 0 ? type : type * MAX_PLAYER + owner;
+  toKey(type, ownerId) {
+    return type * OWNER_ID_MAX + ownerId;
   }
 }
 
@@ -122,6 +147,7 @@ const Board = class {
     this.w = width;
     this.h = height;
     this.cells = new Array(width * height).fill().map(() => new Cell());
+    this.snakes = [];
   }
 
   getDim() {
@@ -139,74 +165,31 @@ const Board = class {
     this.cells[y * this.w + x] = cell;
   }
 
-  generateFood(player) {
+  generate(type, ownerId) {
     const unoccupiedIndexes = this.cells
       .map((cell, idx) => ({cell, idx}))
       .filter(wrapper => wrapper.cell.empty())
       .map(wrapper => wrapper.idx);
 
+    if (unoccupiedIndexes.length == 0) {
+      return;
+    }
+
     const randomIdx = unoccupiedIndexes[Math.floor(Math.random() * unoccupiedIndexes.length)];
-    this.cells[randomIdx].add(CELL_FOOD, player);
-  }
-};
-
-
-const Snake = class {
-  constructor(owner) {
-    this.body = [];
-    this.owner = owner;
+    this.cells[randomIdx].add(type, ownerId);
   }
 
-  getHead() {
-    return this.body[0];
-  }
-
-  getTail() {
-    return this.body[this.body.length - 1];
-  }
-
-  setDirection(direction) {
-    if (this.direction != direction && this.direction + direction != 3) {
-      this.direction = direction;
-      return true;
-    }
-    return false;
-  }
-
-  move() {
-    const { w, h } = this.board.getDim();
-    const head = this.getHead();
-    this.board.at(head)
-      .remove(CELL_SNAKE_HEAD, this.owner)
-      .add(CELL_SNAKE_BODY, this.owner);
-
-    const newHead = {
-      x: (head.x + w + DIRECTION_DIFF_X[this.direction]) % w,
-      y: (head.y + h + DIRECTION_DIFF_Y[this.direction]) % h
-    };
-
-    const cell = this.board.at(newHead);
-    if (cell.get(CELL_FOOD, this.owner) == 0) {
-      const tail = this.getTail();
-      this.board.at(tail).remove(CELL_SNAKE_BODY, this.owner);
-      this.body.pop();
+  addSnake(snake) {
+    if (this.snakes.length >= OWNER_ID_MAX - 1) {
+      return;
     }
 
-    cell.add(CELL_SNAKE_HEAD, this.owner);
-    this.body.unshift(newHead);
+    snake.board = this;
+    snake.id = this.snakes.length + 1;
 
-    const foodOwners = cell.getOwners(CELL_FOOD);
-    if (foodOwners.length > 0) {
-      foodOwners.forEach(owner => cell.remove(CELL_FOOD, owner));
-      foodOwners.forEach(owner => this.board.generateFood(owner));
-    }
-
-  }
-
-  join(board, direction = DIRECTION_RIGHT) {
-    this.board = board;
-    this.direction = direction;
-    const { w, h } = board.getDim();
+    const direction = INITIAL_SNAKE_DIRECTIONS[this.snakes.length];
+    snake.setDirection(direction);
+    const { w, h } = this.getDim();
 
     // Create head
     const head = {};
@@ -228,17 +211,169 @@ const Snake = class {
         head.y = Math.trunc(h / 3);
         break;
     }
-    board.at(head).add(CELL_SNAKE_HEAD, this.owner);
-    this.body.push(head);
+    this.at(head).add(CELL_SNAKE_HEAD, snake.id);
+    snake.body.push(head);
 
     // Create body to the opposite direction
     let { x, y } = head;
-    while (this.body.length < INITIAL_SNAKE_MAX_LENGTH && x > 0 && x < w - 1 && y > 0 && y < h - 1) {
+    while (snake.body.length < INITIAL_SNAKE_MAX_LENGTH && x > 0 && x < w - 1 && y > 0 && y < h - 1) {
       x = x - DIRECTION_DIFF_X[direction];
       y = y - DIRECTION_DIFF_Y[direction]
-      board.at({x, y}).add(CELL_SNAKE_BODY, this.owner);
-      this.body.push({x, y});
+      this.at({x, y}).add(CELL_SNAKE_BODY, snake.id);
+      snake.body.push({x, y});
     }
+
+    this.snakes.push(snake);
+  }
+
+  getSnake(id) {
+    return this.snakes[id - 1];
+  }
+
+  getOtherSnakes(id) {
+    return this.snakes.filter(snake => snake != this.getSnake(id));
+  }
+
+  tick() {
+    this.snakes.forEach(snake => snake.moveAndGrow());
+
+    this.snakes.forEach(snake => {
+      const headPos = snake.getHead();
+      const headCell = this.at(headPos);
+
+      headCell.getOwnerIds(CELL_FOOD).forEach(id => {
+        this.generate(CELL_FOOD, id)
+        if (id != OWNER_ID_BOARD && id != snake.id) {
+          this.getSnake(id).changeSanity(-SANITY_VALUES[CELL_FOOD] * SANITY_STEAL_MULTIPLIER);
+        }
+      });
+      headCell.remove(CELL_FOOD);
+
+      headCell.getOwnerIds(CELL_CORPSE)
+        .filter(id => id != OWNER_ID_BOARD && id != snake.id)
+        .forEach(id => {
+          this.getSnake(id).changeSanity(-SANITY_VALUES[CELL_CORPSE] * SANITY_STEAL_MULTIPLIER);
+        });
+      headCell.remove(CELL_CORPSE);
+
+      if (snake.sanity <= 0) {
+        [...headCell.getOwnerIds(CELL_SNAKE_BODY), ...headCell.getOwnerIds(CELL_SNAKE_HEAD)]
+          .filter(id => id != snake.id)
+          .forEach(id => {
+            const otherSnake = this.getSnake(id);
+            const bodyIdx = otherSnake.indexOf(headPos);
+            otherSnake.turnIntoCorpse(bodyIdx+1);
+            if (otherSnake.length > 1) {
+              headCell.remove(CELL_SNAKE_BODY, otherSnake.id, 1);
+              otherSnake.body.pop();
+            }
+            otherSnake.changeSanity(-headCell.get(CELL_SNAKE_BODY, id) * SANITY_VALUES[CELL_SNAKE_BODY] * SANITY_STEAL_MULTIPLIER);
+          });
+
+        snake.stomach += headCell.getOwnerIds(CELL_SNAKE_BODY)
+          .filter(id => id != snake.id)
+          .map(id => headCell.get(CELL_SNAKE_BODY, id) * STOMACH_VALUES[CELL_SNAKE_BODY] * STOMACH_STEAL_MULTIPLIER)
+          .reduce((a, b) => a + b, 0);
+      }
+    });
+  }
+};
+
+
+const Snake = class {
+  constructor() {
+    this.body = [];
+    this.stomach = 0;
+    this.sanity = 1;
+  }
+
+  getHead() {
+    return this.body[0];
+  }
+
+  getTail() {
+    return this.body[this.body.length - 1];
+  }
+
+  setDirection(direction) {
+    if (this.direction != direction && this.direction + direction != 3) {
+      this.direction = direction;
+      return true;
+    }
+    return false;
+  }
+
+  changeSanity(diff) {
+    this.sanity += diff;
+    this.sanity = Math.min(1, this.sanity);
+    this.sanity = Math.max(-1, this.sanity);
+  }
+
+  moveAndGrow() {
+    const head = this.getHead();
+    this.board.at(head).remove(CELL_SNAKE_HEAD, this.id);
+    if (this.body.length > 1) {
+      this.board.at(head).add(CELL_SNAKE_BODY, this.id);
+    }
+
+    const newHead = this.getNewPos(head, this.direction);
+    const cell = this.board.at(newHead);
+    cell.add(CELL_SNAKE_HEAD, this.id);
+    this.body.unshift(newHead);
+
+    this.eat(cell);
+    this.enjoy(cell);
+
+    if (this.stomach < 1) {
+      const tail = this.getTail();
+      this.board.at(tail).remove(CELL_SNAKE_BODY, this.id, 1);
+      this.body.pop();
+    } else {
+      this.stomach -= 1;
+    }
+  }
+
+  eat(cell, type) {
+    if (type == null) {
+      [CELL_FOOD, CELL_CORPSE].forEach(t => this.eat(cell, t));
+      return;
+    }
+
+    const cnts = cell.getAndGroup(type, [OWNER_ID_BOARD, this.id]);
+    this.stomach += (cnts[OWNER_ID_BOARD] + cnts[this.id] + cnts['other'] * STOMACH_STEAL_MULTIPLIER) * STOMACH_VALUES[type];
+  }
+
+  enjoy(cell, type) {
+    if (type == null) {
+      [CELL_FOOD, CELL_CORPSE].forEach(t => this.enjoy(cell, t));
+      return;
+    }
+    this.changeSanity(cell.get(type) * SANITY_VALUES[type]);
+  }
+
+  noPenalty(id) {
+    return id == this.id || id == OWNER_ID_BOARD;
+  }
+
+  indexOf({x, y}) {
+    return this.body.findIndex(pos => pos.x == x && pos.y == y);
+  }
+
+  turnIntoCorpse(startIdx) {
+    for (let i = startIdx; i < this.body.length; i ++) {
+      const pos = this.body[i];
+      this.board.at(pos).add(CELL_CORPSE, this.id);
+      this.board.at(pos).remove(CELL_SNAKE_BODY, this.id, 1);
+    }
+    this.body.splice(startIdx);
+  }
+
+  getNewPos({x, y}, direction) {
+    const { w, h } = this.board.getDim();
+    return {
+      x: (x + w + DIRECTION_DIFF_X[direction]) % w,
+      y: (y + h + DIRECTION_DIFF_Y[direction]) % h
+    };
   }
 }
 
@@ -272,6 +407,8 @@ const Palette = class {
         return this.createSnakeHead(color);
       case CELL_SNAKE_BODY:
         return this.createSnakeBody(color);
+      case CELL_CORPSE:
+        return this.createCorpse(color);
       case CELL_FOOD:
         return this.createFood(color);
     }
@@ -294,6 +431,16 @@ const Palette = class {
     const {r, g, b, a} = Color.getRGBA(color);
     ctx.fillStyle = Color.toColor({r, g, b, a: a - 0.5});
     ctx.fill(path);
+    return canvas;
+  }
+
+  createCorpse(color) {
+    const canvas = this.createCanvas({w: 64, h: 64});
+    const ctx = canvas.getContext('2d');
+    const {r, g, b, a} = Color.getRGBA(color);
+    ctx.fillStyle = Color.toColor({r, g, b, a: a - 0.2});
+    ctx.arc(32, 32, 15, 0, Math.PI*2, true);
+    ctx.fill();
     return canvas;
   }
 
@@ -382,11 +529,9 @@ const Graphic = {
     };
 
     const cell = board.at({x, y});
-    if (!cell.empty()) {
-    }
     cell.getTypes().forEach(type => {
-      cell.getOwners(type)
-        .map(owner => palette.get(type, owner))
+      cell.getOwnerIds(type)
+        .map(ownerId => palette.get(type, ownerId))
         .forEach(image => Graphic.drawImage(canvas, rect, image));
     });
   },
@@ -398,23 +543,20 @@ const Graphic = {
 
 
 const Player = class {
-  constructor(id, keyCtrl) {
-    this.id = id;
-    this.keyCtrl = keyCtrl;
+  constructor(keyCtrl) {
+    this.keyCtrl = keyCtrl
     this.directionQueue = [];
   }
 
-  join(board, direction = DIRECTION_RIGHT) {
-    this.snake = new Snake(this.id);
-    this.snake.join(board, direction);
+  join(board) {
+    this.snake = new Snake();
+    board.addSnake(this.snake);
   }
-
 
   move() {
     while (this.directionQueue.length > 0 && !this.snake.setDirection(this.directionQueue[0])) {
       this.directionQueue.shift();
     }
-    this.snake.move();
   }
 
   handleKeyEvents(e) {
@@ -432,16 +574,13 @@ const Game = class {
   constructor(canvas) {
     this.canvas = canvas;
     this.board = new Board(DEFAULT_NCOLS, DEFAULT_NROWS);
-    this.palette = new Palette([PLAYER_0_COLOR, PLAYER_1_COLOR]);
+    this.palette = new Palette(DEFAULT_COLORS);
 
-    this.player_0 = new Player(0, PLAYER_0_KEY_CTRL);
-    this.player_1 = new Player(1, PLAYER_1_KEY_CTRL);
+    this.player_1 = new Player(PLAYER_KEY_CTRLS[0]);
+    this.player_2 = new Player(PLAYER_KEY_CTRLS[1]);
 
-    this.player_0.join(this.board, DIRECTION_RIGHT);
-    this.player_1.join(this.board, DIRECTION_LEFT);
-
-    this.board.generateFood(0);
-    this.board.generateFood(1);
+    this.player_1.join(this.board);
+    this.player_2.join(this.board);
 
     this.speed = INITIAL_GAME_SPEED;
     this.lastMove = 0;
@@ -449,6 +588,10 @@ const Game = class {
   }
 
   start() {
+    this.board.generate(CELL_FOOD, this.player_1.snake.id);
+    this.board.generate(CELL_FOOD, this.player_2.snake.id);
+    this.board.generate(CELL_FOOD, OWNER_ID_BOARD);
+
     const redraw = () => {
       if (this.startTime == null) {
         this.startTime = performance.now();
@@ -459,8 +602,9 @@ const Game = class {
 
       // TODO: Issue occurs when the tab loses user's focus for a while
       if (elapsed >= nextMove) {
-        this.player_0.move();
         this.player_1.move();
+        this.player_2.move();
+        this.board.tick();
         this.lastMove = nextMove;
       }
 
@@ -472,8 +616,8 @@ const Game = class {
   }
 
   handleKeyEvents(e) {
-    this.player_0.handleKeyEvents(e);
     this.player_1.handleKeyEvents(e);
+    this.player_2.handleKeyEvents(e);
   }
 }
 
