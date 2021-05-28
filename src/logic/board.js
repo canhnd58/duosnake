@@ -108,6 +108,7 @@ const Board = class {
       snake.body.push({ x, y })
     }
 
+    snake.prepare()
     this.snakes.push(snake)
   }
 
@@ -126,11 +127,8 @@ const Board = class {
   tick() {
     this.snakes.forEach((snake) => snake.move())
     this.snakes.forEach((snake) => snake.eat())
-    this.snakes.forEach((snake) => snake.enjoy())
     this.snakes.forEach((snake) => snake.grow())
-    this.snakes
-      .filter((snake) => snake.sanity <= 0)
-      .forEach((snake) => snake.bite())
+    this.snakes.forEach((snake) => snake.bite())
 
     this.snakes
       .map((snake) => this.at(snake.getHead()))
@@ -141,7 +139,7 @@ const Board = class {
         ;[CELL_FOOD, CELL_CORPSE].forEach((t) => headCell.remove(t))
       })
 
-    this.snakes.map((snake) => snake.toDebugStr()).forEach((str) => debug(str))
+    debug(this.snakes.map((snake) => snake.toDebugStr()).join('   ---   '))
   }
 }
 

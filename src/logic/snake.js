@@ -15,8 +15,9 @@ const STOMACH_VALUES = {
   [CELL_CORPSE]: 0.25,
 }
 
-const SANITY_STEAL_MULTIPLIER = 5
-const SANITY_VALUES = {
+const INITIAL_SELF_LOVE = 0.3
+const LOVE_STEAL_MULTIPLIER = 5
+const LOVE_VALUES = {
   [CELL_FOOD]: 0.1,
   [CELL_CORPSE]: 0.01,
   [CELL_SNAKE_BODY]: 0.4,
@@ -26,11 +27,20 @@ const Snake = class {
   constructor() {
     this.body = []
     this.stomach = 0
-    this.sanity = 1
+    this.love = {}
+  }
+
+  // called when the snake is added to a board
+  prepare() {
+    this.love[this.id] = INITIAL_SELF_LOVE
   }
 
   toDebugStr() {
-    return `snake=${this.id} len=${this.body.length} stomach=${this.stomach} sanity=${this.sanity}`
+    const loveStr =
+      Object.keys(this.love)
+        .map((id) => `${this.love[id].toString().padStart(5)}(love-${id})`)
+        .join(' ') || ''
+    return `${this.id}: ${this.body.length}(len) ${loveStr}`
   }
 
   getHead() {
@@ -49,16 +59,20 @@ const Snake = class {
     return false
   }
 
-  fillStomach(diff) {
+  adjustStomach(diff) {
     this.stomach += diff
     this.stomach = round(this.stomach)
   }
 
-  fillSanity(diff) {
-    this.sanity += diff
-    this.sanity = Math.min(1, this.sanity)
-    this.sanity = Math.max(-1, this.sanity)
-    this.sanity = round(this.sanity)
+  getLove(who) {
+    return this.love[who] || 0
+  }
+
+  adjustLove(who, diff) {
+    this.love[who] = this.getLove(who) + diff
+    this.love[who] = Math.min(1, this.love[who])
+    this.love[who] = Math.max(-1, this.love[who])
+    this.love[who] = round(this.love[who])
   }
 
   move() {
@@ -79,7 +93,7 @@ const Snake = class {
       this.board.at(tail).remove(CELL_SNAKE_BODY, this.id, 1)
       this.body.pop()
     } else {
-      this.fillStomach(-1)
+      this.adjustStomach(-1)
     }
   }
 
@@ -94,34 +108,36 @@ const Snake = class {
       this.board.getNoOwnerId(),
       this.id,
     ])
-    this.fillStomach(
+    this.adjustStomach(
       (cnts[this.board.getNoOwnerId()] +
         cnts[this.id] +
         cnts['other'] * STOMACH_STEAL_MULTIPLIER) *
         STOMACH_VALUES[type]
     )
 
-    headCell
-      .getOwnerIds(type)
-      .filter((id) => this.isStealing(id))
-      .map((id) => this.board.getSnake(id))
-      .forEach((otherSnake) =>
-        otherSnake.fillSanity(
-          -SANITY_VALUES[type] *
-            headCell.get(type, otherSnake.id) *
-            SANITY_STEAL_MULTIPLIER
-        )
+    // Stealing others' food makes oneself hated
+    // Do what you are supposed to do, others will continue to love you
+    this.board.getOtherSnakes(this.id).forEach((snake) => {
+      snake.adjustLove(
+        this.id,
+        -LOVE_VALUES[type] *
+          headCell.get(type, snake.id) *
+          LOVE_STEAL_MULTIPLIER
       )
-  }
+      snake.adjustLove(this.id, LOVE_VALUES[type] * headCell.get(type, this.id))
+    })
 
-  enjoy(type) {
-    if (type == null) {
-      ;[CELL_FOOD, CELL_CORPSE].forEach((t) => this.enjoy(t))
-      return
-    }
-    this.fillSanity(
-      this.board.at(this.getHead()).get(type) * SANITY_VALUES[type]
-    )
+    // The more the snake grows, the more he faces existential crisis
+    this.adjustLove(this.id, -headCell.get(type) * LOVE_VALUES[type])
+
+    // Each time a snake eats, others feel less lonely
+    this.board.getOtherSnakes(this.id).forEach((snake) => {
+      snake.adjustLove(
+        snake.id,
+        (headCell.get(type) * LOVE_VALUES[type]) /
+          (this.board.snakes.length - 1 || 1)
+      )
+    })
   }
 
   bite(type) {
@@ -130,19 +146,24 @@ const Snake = class {
       return
     }
     const headCell = this.board.at(this.getHead())
-    headCell
-      .getOwnerIds(type)
-      .filter((id) => this.isStealing(id))
-      .forEach((id) => {
-        const otherSnake = this.board.getSnake(id)
-        const bodyIdx = otherSnake.indexOf(this.getHead())
-        otherSnake.turnIntoCorpse(bodyIdx + 1)
+
+    this.board.snakes
+      .filter((snake) => type != CELL_SNAKE_HEAD || snake.id != this.id)
+      .filter((snake) => headCell.get(type, snake.id) > 0)
+      .filter((snake) => this.getLove(snake.id) < 0) // Don't bite loved ones
+      .forEach((snake) => {
+        const bodyIdx = snake.indexOf(
+          this.getHead(),
+          snake.id == this.id ? 1 : 0
+        ) // Don't bite its own head
+        snake.turnIntoCorpse(bodyIdx + 1)
         if (type == CELL_SNAKE_BODY) {
-          headCell.remove(CELL_SNAKE_BODY, otherSnake.id, 1)
-          otherSnake.body.pop()
+          headCell.remove(CELL_SNAKE_BODY, snake.id, 1)
+          snake.body.pop()
         }
-        otherSnake.fillSanity(
-          -SANITY_VALUES[CELL_SNAKE_BODY] * SANITY_STEAL_MULTIPLIER
+        snake.adjustLove(
+          this.id,
+          -LOVE_VALUES[CELL_SNAKE_BODY] * LOVE_STEAL_MULTIPLIER
         )
       })
   }
@@ -151,8 +172,10 @@ const Snake = class {
     return id != this.id && id != this.board.getNoOwnerId()
   }
 
-  indexOf({ x, y }) {
-    return this.body.findIndex((pos) => pos.x == x && pos.y == y)
+  indexOf({ x, y }, start = 0) {
+    return this.body.findIndex(
+      (pos, i) => i >= start && pos.x == x && pos.y == y
+    )
   }
 
   turnIntoCorpse(startIdx) {
