@@ -24,7 +24,11 @@ const Board = class {
   constructor(width, height) {
     this.w = width
     this.h = height
-    this.cells = new Array(width * height).fill().map(() => new Cell())
+    this.reset()
+  }
+
+  reset() {
+    this.cells = new Array(this.w * this.h).fill().map(() => new Cell())
     this.snakes = []
   }
 
@@ -44,6 +48,13 @@ const Board = class {
   }
 
   generate(type, ownerId) {
+    if (ownerId == null) {
+      ;[this.getNoOwnerId(), ...this.snakes.map((snake) => snake.id)].forEach(
+        (id) => this.generate(type, id)
+      )
+      return
+    }
+
     const unoccupiedIndexes = this.cells
       .map((cell, idx) => ({ cell, idx }))
       .filter((wrapper) => wrapper.cell.empty())

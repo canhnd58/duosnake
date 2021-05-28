@@ -1,6 +1,17 @@
-import Snake from './logic/snake'
+import { createSnake } from './logic/snake'
+import {
+  GAME_MODE_ADVENTURE,
+  GAME_MODE_CLASSIC,
+  SNAKE_TYPE_CLASSIC,
+  SNAKE_TYPE_SENSITIVE,
+} from './const'
 
 const DEFAULT_MAXIMUM_DIRECTION_QUEUE_SIZE = 4
+
+const GAME_MODE_TO_SNAKE_TYPE = {
+  [GAME_MODE_CLASSIC]: SNAKE_TYPE_CLASSIC,
+  [GAME_MODE_ADVENTURE]: SNAKE_TYPE_SENSITIVE,
+}
 
 const Player = class {
   constructor(keyCtrl) {
@@ -8,8 +19,8 @@ const Player = class {
     this.directionQueue = []
   }
 
-  join(board) {
-    this.snake = new Snake()
+  join(board, mode) {
+    this.snake = createSnake(GAME_MODE_TO_SNAKE_TYPE[mode])
     board.addSnake(this.snake)
   }
 

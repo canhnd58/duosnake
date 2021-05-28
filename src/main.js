@@ -1,5 +1,6 @@
 import './styles.css'
 import Game from './game'
+import * as consts from './const'
 
 const DEFAULT_DPI_MULTIPLIER = 2
 
@@ -11,9 +12,15 @@ const main = () => {
   canvas.height = canvas.clientHeight * DEFAULT_DPI_MULTIPLIER
 
   // Create and start the game
-  const game = new Game(canvas)
+  const game = new Game(canvas, consts.GAME_MODE_ADVENTURE)
   document.addEventListener('keydown', (e) => game.handleKeyEvents(e))
   game.start()
+
+  // In development mode, expose game object and all the constants to the console
+  if (!consts.RELEASE) {
+    Object.keys(consts).forEach((k) => (window[k] = consts[k]))
+    window.game = game
+  }
 }
 
 window.onload = main

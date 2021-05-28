@@ -1,13 +1,12 @@
-import { round } from '../util'
+import ClassicSnake from './classic'
+import { round } from '../../util'
 
 import {
   CELL_SNAKE_HEAD,
   CELL_SNAKE_BODY,
   CELL_FOOD,
   CELL_CORPSE,
-  DIRECTION_DIFF_X,
-  DIRECTION_DIFF_Y,
-} from '../const'
+} from '../../const'
 
 const STOMACH_STEAL_MULTIPLIER = 2
 const STOMACH_VALUES = {
@@ -23,15 +22,15 @@ const LOVE_VALUES = {
   [CELL_SNAKE_BODY]: 0.4,
 }
 
-const Snake = class {
+const SensitiveSnake = class extends ClassicSnake {
   constructor() {
-    this.body = []
-    this.stomach = 0
+    super()
     this.love = {}
   }
 
   // called when the snake is added to a board
   prepare() {
+    super.prepare()
     this.love[this.id] = INITIAL_SELF_LOVE
   }
 
@@ -40,28 +39,7 @@ const Snake = class {
       Object.keys(this.love)
         .map((id) => `${this.love[id].toString().padStart(5)}(love-${id})`)
         .join(' ') || ''
-    return `${this.id}: ${this.body.length}(len) ${loveStr}`
-  }
-
-  getHead() {
-    return this.body[0]
-  }
-
-  getTail() {
-    return this.body[this.body.length - 1]
-  }
-
-  setDirection(direction) {
-    if (this.direction != direction && this.direction + direction != 3) {
-      this.direction = direction
-      return true
-    }
-    return false
-  }
-
-  adjustStomach(diff) {
-    this.stomach += diff
-    this.stomach = round(this.stomach)
+    return `${super.toDebugStr()} ${loveStr}`
   }
 
   getLove(who) {
@@ -75,28 +53,6 @@ const Snake = class {
     this.love[who] = round(this.love[who])
   }
 
-  move() {
-    const head = this.getHead()
-    this.board.at(head).remove(CELL_SNAKE_HEAD, this.id)
-    if (this.body.length > 1) {
-      this.board.at(head).add(CELL_SNAKE_BODY, this.id)
-    }
-
-    const newHead = this.getNewPos(head, this.direction)
-    this.board.at(newHead).add(CELL_SNAKE_HEAD, this.id)
-    this.body.unshift(newHead)
-  }
-
-  grow() {
-    if (this.stomach < 1) {
-      const tail = this.getTail()
-      this.board.at(tail).remove(CELL_SNAKE_BODY, this.id, 1)
-      this.body.pop()
-    } else {
-      this.adjustStomach(-1)
-    }
-  }
-
   eat(type) {
     if (type == null) {
       ;[CELL_FOOD, CELL_CORPSE].forEach((t) => this.eat(t))
@@ -108,6 +64,7 @@ const Snake = class {
       this.board.getNoOwnerId(),
       this.id,
     ])
+
     this.adjustStomach(
       (cnts[this.board.getNoOwnerId()] +
         cnts[this.id] +
@@ -186,14 +143,6 @@ const Snake = class {
     }
     this.body.splice(startIdx)
   }
-
-  getNewPos({ x, y }, direction) {
-    const { w, h } = this.board.getDim()
-    return {
-      x: (x + w + DIRECTION_DIFF_X[direction]) % w,
-      y: (y + h + DIRECTION_DIFF_Y[direction]) % h,
-    }
-  }
 }
 
-export default Snake
+export default SensitiveSnake

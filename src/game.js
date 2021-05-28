@@ -40,16 +40,22 @@ const PLAYER_KEY_CTRLS = [
 ]
 
 const Game = class {
-  constructor(canvas) {
+  constructor(canvas, mode) {
     this.canvas = canvas
-    this.board = new Board(DEFAULT_NCOLS, DEFAULT_NROWS)
-    this.palette = new Palette(DEFAULT_COLORS)
+    this.mode = mode
 
     this.player_1 = new Player(PLAYER_KEY_CTRLS[0])
     this.player_2 = new Player(PLAYER_KEY_CTRLS[1])
 
-    this.player_1.join(this.board)
-    this.player_2.join(this.board)
+    this.reset()
+  }
+
+  reset() {
+    this.board = new Board(DEFAULT_NCOLS, DEFAULT_NROWS)
+    this.palette = new Palette(DEFAULT_COLORS)
+
+    this.player_1.join(this.board, this.mode)
+    this.player_2.join(this.board, this.mode)
 
     this.speed = INITIAL_GAME_SPEED
     this.lastMove = 0
@@ -57,12 +63,17 @@ const Game = class {
   }
 
   start() {
-    this.board.snakes.forEach((snake) =>
-      this.board.generate(CELL_FOOD, snake.id)
-    )
-    this.board.generate(CELL_FOOD, this.board.getNoOwnerId())
+    this.board.generate(CELL_FOOD)
+    this.loop()
+  }
 
+  loop() {
     const redraw = () => {
+      if (this.gameover()) {
+        this.reset()
+        this.board.generate(CELL_FOOD)
+      }
+
       if (this.startTime == null) {
         this.startTime = performance.now()
       }
@@ -83,6 +94,10 @@ const Game = class {
     }
 
     window.requestAnimationFrame(redraw)
+  }
+
+  gameover() {
+    return this.board.snakes.some((snake) => snake.dead)
   }
 
   handleKeyEvents(e) {
