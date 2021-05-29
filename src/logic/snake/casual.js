@@ -22,7 +22,7 @@ const LOVE_VALUES = {
   [CELL_SNAKE_BODY]: 0.4,
 }
 
-const SensitiveSnake = class extends ClassicSnake {
+const CasualSnake = class extends ClassicSnake {
   constructor() {
     super()
     this.love = {}
@@ -145,4 +145,4 @@ const SensitiveSnake = class extends ClassicSnake {
   }
 }
 
-export default SensitiveSnake
+export default CasualSnake

@@ -12,7 +12,7 @@ const main = () => {
   canvas.height = canvas.clientHeight * DEFAULT_DPI_MULTIPLIER
 
   // Create and start the game
-  const game = new Game(canvas, consts.GAME_MODE_ADVENTURE)
+  const game = new Game(canvas, consts.GAME_MODE_CASUAL)
   document.addEventListener('keydown', (e) => game.handleKeyEvents(e))
   game.start()
 
