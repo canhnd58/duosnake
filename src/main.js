@@ -13,14 +13,11 @@ const main = () => {
 
   // Create and start the game
   const game = new Game(canvas, consts.GAME_MODE_CASUAL)
-  document.addEventListener('keydown', (e) => game.handleKeyEvents(e))
   game.start()
 
-  // In development mode, expose game object and all the constants to the console
-  if (!consts.RELEASE) {
-    Object.keys(consts).forEach((k) => (window[k] = consts[k]))
-    window.game = game
-  }
+  // Expose game object and all the constants to the console
+  Object.keys(consts).forEach((k) => (window[k] = consts[k]))
+  window.game = game
 }
 
 window.onload = main

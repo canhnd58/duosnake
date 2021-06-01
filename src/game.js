@@ -47,7 +47,26 @@ const Game = class {
     this.player_1 = new Player(PLAYER_KEY_CTRLS[0])
     this.player_2 = new Player(PLAYER_KEY_CTRLS[1])
 
+    this.quit = false
     this.reset()
+
+    this.pauseHandler = this.pause.bind(this)
+    this.unpauseHandler = this.unpause.bind(this)
+    this.keydownHandler = this.handleKeyEvents.bind(this)
+
+    window.addEventListener('focus', this.unpauseHandler)
+    window.addEventListener('blur', this.pauseHandler)
+    window.addEventListener('keydown', this.keydownHandler)
+
+    this.animationRequestId = null
+  }
+
+  finalize() {
+    // This method must be called manually
+    this.quit = true
+    window.removeEventListener('focus', this.unpauseHandler)
+    window.removeEventListener('blur', this.pauseHandler)
+    window.removeEventListener('keydown', this.keydownHandler)
   }
 
   reset() {
@@ -57,21 +76,36 @@ const Game = class {
     this.player_1.join(this.board, this.mode)
     this.player_2.join(this.board, this.mode)
 
+    draw(this.canvas, this.board, this.palette)
+
     this.speed = INITIAL_GAME_SPEED
     this.lastMove = 0
     this.startTime = null
+    this.pauseTime = null
+    this.unpauseTime = null
+
+    if (this.animationRequestId) {
+      window.cancelAnimationFrame(this.animationRequestId)
+    }
   }
 
   start() {
-    this.board.generate(CELL_FOOD)
-    this.loop()
+    if (this.startTime == null) {
+      this.board.generate(CELL_FOOD)
+      this.loop()
+    }
   }
 
   loop() {
     const redraw = () => {
+      if (this.quit || this.pausing()) {
+        window.cancelAnimationFrame(this.animationRequestId)
+        return
+      }
+
       if (this.gameover()) {
         this.reset()
-        this.board.generate(CELL_FOOD)
+        this.start()
       }
 
       if (this.startTime == null) {
@@ -79,25 +113,48 @@ const Game = class {
       }
 
       const elapsed = performance.now() - this.startTime
-      const nextMove = this.lastMove + DEFAULT_NEXT_MOVE_DELAY / this.speed
+      const paused = this.unpauseTime - this.pauseTime || 0
+      const nextMove =
+        this.lastMove + paused + DEFAULT_NEXT_MOVE_DELAY / this.speed
 
-      // TODO: Issue occurs when the tab loses user's focus for a while
       if (elapsed >= nextMove) {
         this.player_1.move()
         this.player_2.move()
         this.board.tick()
         this.lastMove = nextMove
+        this.pauseTime = null
+        this.unpauseTime = null
       }
 
       draw(this.canvas, this.board, this.palette)
-      window.requestAnimationFrame(redraw)
+      this.animationRequestId = window.requestAnimationFrame(redraw)
     }
 
-    window.requestAnimationFrame(redraw)
+    this.animationRequestId = window.requestAnimationFrame(redraw)
   }
 
   gameover() {
     return this.board.snakes.some((snake) => snake.dead)
+  }
+
+  pausing() {
+    return (
+      this.pauseTime != null &&
+      (this.unpauseTime == null || this.unpauseTime <= this.pauseTime)
+    )
+  }
+
+  pause() {
+    this.pauseTime = performance.now()
+    console.log('pause')
+  }
+
+  unpause() {
+    if (this.pauseTime != null) {
+      this.unpauseTime = performance.now()
+      this.loop()
+      console.log('unpause')
+    }
   }
 
   handleKeyEvents(e) {
