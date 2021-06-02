@@ -1,3 +1,5 @@
 # Duo snake
 
-Do not click [here](https://canhnd58.github.io/duosnake/) (unless you are Nam Răng).
+This is the place to test what we learnt and want to learn. Code anything you like.
+
+Click [here](https://canhnd58.github.io/duosnake/) to play.
